@@ -29,6 +29,10 @@ export interface AppConfig {
   rateLimitOpenIssuesMax: number;
   /** Rate limit window in milliseconds for open issues endpoint (default: 60000 = 1 minute). */
   rateLimitOpenIssuesWindowMs: number;
+  /** Maximum bounties list requests per window (default: 60). */
+  rateLimitBountiesMax: number;
+  /** Rate limit window in milliseconds for bounties list endpoint (default: 60000 = 1 minute). */
+  rateLimitBountiesWindowMs: number;
   /** Default pagination limit for list endpoints (default: 20). */
   defaultPageSize: number;
   /** Maximum allowable pagination limit for list endpoints (default: 100). */
@@ -74,6 +78,11 @@ export function getAppConfig(): AppConfig {
     rateLimitOpenIssuesMax: parsePositiveInt(process.env.RATE_LIMIT_OPEN_ISSUES_MAX, 30),
     rateLimitOpenIssuesWindowMs: parsePositiveInt(
       process.env.RATE_LIMIT_OPEN_ISSUES_WINDOW_MS,
+      60_000
+    ),
+    rateLimitBountiesMax: parsePositiveInt(process.env.RATE_LIMIT_BOUNTIES_MAX, 60),
+    rateLimitBountiesWindowMs: parsePositiveInt(
+      process.env.RATE_LIMIT_BOUNTIES_WINDOW_MS,
       60_000
     ),
     defaultPageSize: parsePositiveInt(process.env.DEFAULT_PAGE_SIZE, 20),
