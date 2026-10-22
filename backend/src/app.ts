@@ -1179,6 +1179,23 @@ app.post(
   }
 );
 
+/**
+ * Zod schema for POST /api/bounties/:id/release.
+ *
+ * Validates every input the route accepts before the store or contract layer
+ * is touched: the `:id` path param, the (empty) query string, and the JSON
+ * body carrying the maintainer address and optional transaction hash.
+ */
+const releaseBountyParamsSchema = z.object({ id: bountyIdSchema }).strict();
+const releaseBountyQuerySchema = z.object({}).strict();
+const releaseBountyBodySchema = maintainerActionSchema;
+
+const releaseBountyRequestSchema = z.object({
+  params: releaseBountyParamsSchema,
+  query: releaseBountyQuerySchema,
+  body: releaseBountyBodySchema,
+});
+
 app.post(
   '/api/bounties/:id/release',
   releaseLimiter,
@@ -1186,11 +1203,25 @@ app.post(
   requireJsonContentType,
   idempotencyMiddleware,
   createStellarSignatureAuthMiddleware(),
-  validateBody(maintainerActionSchema),
+  (req: Request, res: Response, next: NextFunction) => {
+    const parsed = releaseBountyRequestSchema.safeParse({
+      params: req.params,
+      query: req.query,
+      body: req.body,
+    });
+
+    if (!parsed.success) {
+      jsonError(res, req, 400, `INVALID_INPUT: ${zodErrorMessage(parsed.error)}`);
+      return;
+    }
+
+    req.body = parsed.data.body;
+    next();
+  },
   async (req: Request, res: Response) => {
     try {
       const bounty = await releaseBounty(
-        parseId(req.params.id),
+        req.params.id,
         req.body.maintainer,
         req.body.transactionHash
       );
