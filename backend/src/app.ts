@@ -149,7 +149,13 @@ const readLimiter = rateLimit({
   message: { error: 'Too many read requests, please slow down.' },
   skip: (req: Request) =>
     (process.env.NODE_ENV === 'test' && process.env.RATE_LIMIT_TEST_MODE !== 'true') ||
-    Boolean(req.path && (req.path === '/api/open-issues' || req.path.endsWith('/open-issues'))),
+    Boolean(
+      req.path &&
+        (req.path === '/api/open-issues' ||
+          req.path.endsWith('/open-issues') ||
+          req.path === '/api/bounties' ||
+          req.path === '/api/bounties/')
+    ),
 });
 
 const mutationLimiter = rateLimit({
@@ -307,6 +313,44 @@ export const openIssuesLimiter = rateLimit({
     res.setHeader('Retry-After', String(retryAfter));
     res.status(429).json({
       error: 'Too many requests for open issues. Please try again later.',
+      retryAfter,
+      requestId: req.requestId,
+    });
+  },
+});
+
+/**
+ * Route-specific explicit rate limiter for GET /api/bounties (#1220).
+ *
+ * Cost justification:
+ * Fetching the bounties list is an unauthenticated, public read endpoint with moderate-to-high cost:
+ * 1. Executes multi-parameter query filtering (q, repo, status, tokenSymbol, contributor, maintainer,
+ *    minReward, maxReward, deadlineBefore, deadlineAfter) and sorting across all bounties in the store.
+ * 2. Employs caching (`listBountiesCached`) backed by an in-memory or Redis layer, and generates/validates
+ *    conditional HTTP headers (ETag, Last-Modified, If-None-Match).
+ * 3. On cache misses or high-cardinality filter permutations (custom text search / query variants),
+ *    each request forces an in-memory scan, array slicing, and JSON serialization of potentially large
+ *    bounty payloads.
+ * 4. While legitimate clients (frontend index and search pages) query this endpoint when users browse or
+ *    filter bounties, excessive unauthenticated bursts could exhaust backend CPU and memory.
+ *
+ * An explicit ceiling of 60 requests per minute (configurable via RATE_LIMIT_BOUNTIES_MAX and
+ * RATE_LIMIT_BOUNTIES_WINDOW_MS) balances responsive browsing for human users with protection
+ * against automated scraping, denial of service, and resource exhaustion.
+ *
+ * When the limit is exceeded, HTTP 429 is returned with an explicit Retry-After header.
+ */
+export const bountiesLimiter = rateLimit({
+  windowMs: appConfig.rateLimitBountiesWindowMs,
+  max: appConfig.rateLimitBountiesMax,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test' && process.env.RATE_LIMIT_TEST_MODE !== 'true',
+  handler: (req: Request, res: Response) => {
+    const retryAfter = Math.ceil(appConfig.rateLimitBountiesWindowMs / 1000);
+    res.setHeader('Retry-After', String(retryAfter));
+    res.status(429).json({
+      error: 'Too many requests for bounties. Please try again later.',
       retryAfter,
       requestId: req.requestId,
     });
@@ -798,7 +842,7 @@ app.delete(
   }
 );
 
-app.get('/api/bounties', async (req: Request, res: Response) => {
+app.get('/api/bounties', bountiesLimiter, async (req: Request, res: Response) => {
   try {
     const q = typeof req.query.q === 'string' ? req.query.q : undefined;
     const contributor =
